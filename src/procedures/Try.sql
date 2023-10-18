@@ -7,12 +7,12 @@ drop proc dbo.Try
 go
 
 
-create proc dbo.Try
+create proc [dbo].[Try]
 	@proc nvarchar(max) = '',
 	@fail bit = 1,
-	@retryCount int = 3,
+	@retryCount int = 1,
 	@retryDelay varchar(12) = '00:00:00.500',
-	@debug bit = 0
+	@exception varchar(max) = null out
 as
 begin
 	set nocount on;
@@ -20,19 +20,23 @@ begin
 	if (@proc is null or len(@proc) = 0)
 		throw 52001, 'Paramaeter @proc is empty', 1;
 
-	set @retryCount = iif(@retryCount <= 0, 1, @retryCount);
-	set @retryDelay = iif(@retryDelay = '', '00:00:00.500', @retryDelay);
+	set @retryCount = iif(isnull(@retryCount, 0) <= 0, 1, @retryCount);
+	set @retryDelay = iif(isnull(@retryDelay, '') = '', '00:00:00.500', @retryDelay);
 
 	while @retryCount > 0
 	begin
 		begin try
-			if (@debug = 1)
-				print formatmessage('%s exec dbo.Try ''%s'', %i, %s',
-					format(getdate(), 'HH:mm:ss.fff'), @proc, @retryCount, @retryDelay);
+			print formatmessage('%s execute ''%s'' retryCount = %i retryDelay= %s',
+				format(getdate(), 'HH:mm:ss.fff'), @proc, @retryCount, @retryDelay);
 			exec sp_executesql @proc;
 			return;
 		end try
 		begin catch
+		  set @exception = isnull(@exception + '
+', '')
+				+ 'Exception in ' + @proc + ':
+'
+				+ error_message();
 			if (@retryCount = 1 and @fail = 1)
 				throw;
 			waitfor delay @retryDelay;
@@ -59,12 +63,12 @@ begin
 end;
 go
 
-exec dbo.Try @proc = 'dbo.Test @fail = 0', @fail = 1, @retryCount = 2, @retryDelay = '00:00:00.010', @debug = 1;
+exec dbo.Try @proc = 'dbo.Test @fail = 0', @fail = 1, @retryCount = 2, @retryDelay = '00:00:00.010';
 print 'Test 1 done'
-exec dbo.Try @proc = 'dbo.Test @fail = 1', @fail = 0, @retryCount = 2, @retryDelay = '00:00:00.010', @debug = 1;
+exec dbo.Try @proc = 'dbo.Test @fail = 1', @fail = 0, @retryCount = 2, @retryDelay = '00:00:00.010';
 print 'Test 2 done'
 begin try
-	exec dbo.Try @proc = 'dbo.Test @fail = 1', @fail = 1, @retryCount = 2, @retryDelay = '00:00:00.010', @debug = 1;
+	exec dbo.Try @proc = 'dbo.Test @fail = 1', @fail = 1, @retryCount = 2, @retryDelay = '00:00:00.010';
 	throw 50921, 'Test 3 error', 1
 end try
 begin catch
